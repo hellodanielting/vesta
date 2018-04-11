@@ -273,7 +273,16 @@ is_object_value_exist() {
 is_password_valid() {
     if [[ "$password" =~ ^/tmp/ ]]; then
         if [ -f "$password" ]; then
-            password=$(head -n1 $password)
+            password="$(head -n1 $password)"
+        fi
+    fi
+}
+
+# Check if hash is transmitted via file
+is_hash_valid() {
+    if [[ "$hash" =~ ^/tmp/ ]]; then
+        if [ -f "$hash" ]; then
+            hash="$(head -n1 $hash)"
         fi
     fi
 }
@@ -594,9 +603,24 @@ is_common_format_valid() {
         check_result $E_INVALID "invalid $2 format :: $1"
     fi
     if [[ $1 =~ \* ]]; then
-        if [ "$(echo $1 | grep -o '*'|wc -l)" -gt 1 ]; then
-            check_result $E_INVALID "invalid $2 format :: $1"
+        if [[ "$(echo $1 | grep -o '\*\.' |wc -l)" -eq 0 ]] && [[ $1 != '*' ]] ; then
+                        check_result $E_INVALID "invalid $2 format :: $1"
         fi
+    fi
+    if [[ $(echo -n "$1" | tail -c 1) =~ [^a-zA-Z0-9_*@] ]]; then
+           check_result $E_INVALID "invalid $2 format :: $1"
+    fi
+    if [[ $(echo -n "$1" | grep -c '\.\.') -gt 0 ]];then
+           check_result $E_INVALID "invalid $2 format :: $1"
+    fi
+    if [[ $(echo -n "$1" | head -c 1) =~ [^a-zA-Z0-9_*@] ]]; then
+           check_result $E_INVALID "invalid $2 format :: $1"
+    fi
+    if [[ $(echo -n "$1" | grep -c '\-\-') -gt 0 ]]; then
+           check_result $E_INVALID "invalid $2 format :: $1"
+    fi
+    if [[ $(echo -n "$1" | grep -c '\_\_') -gt 0 ]]; then
+           check_result $E_INVALID "invalid $2 format :: $1"
     fi
 }
 
@@ -619,8 +643,8 @@ is_date_format_valid() {
 is_dbuser_format_valid() {
     exclude="[!|@|#|$|^|&|*|(|)|+|=|{|}|:|,|<|>|?|/|\|\"|'|;|%|\`| ]"
     if [ 17 -le ${#1} ]; then
-		check_result $E_INVALID "mysql username can be up to 16 characters long"
-	fi
+        check_result $E_INVALID "mysql username can be up to 16 characters long"
+    fi
     if [[ "$1" =~ $exclude ]]; then
         check_result $E_INVALID "invalid $2 format :: $1"
     fi
@@ -708,8 +732,12 @@ is_ip_status_format_valid() {
 
 # Cron validator
 is_cron_format_valid() {
-    limit=60
+    limit=59
     check_format=''
+    if [ "$2" = 'hour' ]; then
+        limit=23
+    fi
+    
     if [ "$2" = 'day' ]; then
         limit=31
     fi
@@ -738,9 +766,13 @@ is_cron_format_valid() {
             fi
         done
     fi
-    if [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -le $limit ]; then
-        check_format='ok'
-    fi
+    crn_values=$(echo $1 |tr "," " " | tr "-" " ")
+    for crn_vl in $crn_values
+        do
+            if [[ "$crn_vl" =~ ^[0-9]+$ ]] && [ "$crn_vl" -le $limit ]; then
+                 check_format='ok'
+              fi
+        done
     if [ "$check_format" != 'ok' ]; then
         check_result $E_INVALID "invalid $2 format :: $1"
     fi
@@ -755,7 +787,7 @@ is_name_format_valid() {
 
 # Object validator
 is_object_format_valid() {
-    if ! [[ "$1" =~ ^[[:alnum:]][-|\.|_[:alnum:]]{0,28}[[:alnum:]]$ ]]; then
+    if ! [[ "$1" =~ ^[[:alnum:]][-|\.|_[:alnum:]]{0,64}[[:alnum:]]$ ]]; then
         check_result $E_INVALID "invalid $2 format :: $1"
     fi
 }
@@ -779,7 +811,7 @@ is_format_valid() {
                 antispam)       is_boolean_format_valid "$arg" 'antispam' ;;
                 antivirus)      is_boolean_format_valid "$arg" 'antivirus' ;;
                 autoreply)      is_autoreply_format_valid "$arg" ;;
-                backup)         is_user_format_valid "$arg" 'backup' ;;
+                backup)         is_object_format_valid "$arg" 'backup' ;;
                 charset)        is_object_format_valid "$arg" "$arg_name" ;;
                 charsets)       is_common_format_valid "$arg" 'charsets' ;;
                 comment)        is_object_format_valid "$arg" 'comment' ;;
@@ -860,7 +892,10 @@ format_domain() {
         domain=$(echo "$domain" |sed -e "s/^www.//")
     fi
     if [[ "$domain" =~ .*\.$ ]]; then
-        domain=$(echo "$domain" |sed -e "s/\.$//")
+        domain=$(echo "$domain" |sed -e "s/[.]*$//g")
+    fi
+    if [[ "$domain" =~ ^\. ]]; then
+        domain=$(echo "$domain" |sed -e "s/^[.]*//")
     fi
 }
 
@@ -877,6 +912,9 @@ format_aliases() {
     if [ ! -z "$aliases" ] && [ "$aliases" != 'none' ]; then
         aliases=$(echo $aliases |tr '[:upper:]' '[:lower:]' |tr ',' '\n')
         aliases=$(echo "$aliases" |sed -e "s/\.$//" |sort -u)
+        aliases=$(echo "$aliases" |tr -s '.')
+        aliases=$(echo "$aliases" |sed -e "s/[.]*$//g")
+        aliases=$(echo "$aliases" |sed -e "s/^[.]*//")
         aliases=$(echo "$aliases" |grep -v www.$domain |sed -e "/^$/d")
         aliases=$(echo "$aliases" |tr '\n' ',' |sed -e "s/,$//")
     fi
